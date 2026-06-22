@@ -57,7 +57,9 @@ const recentPeriods = (endPeriod: string, limit: number) =>
 
 const wonSales = (sales: Sale[]) => sales.filter((sale) => sale.stage === 'won')
 
-const saleRevenuePeriod = (sale: Sale) => periodFromDate(sale.expectedCloseDate)
+export const saleRevenueDate = (sale: Sale) => sale.closedAt || sale.expectedCloseDate
+
+const saleRevenuePeriod = (sale: Sale) => periodFromDate(saleRevenueDate(sale))
 
 export const wonSalesRevenuePeriods = (
   sales: Sale[],

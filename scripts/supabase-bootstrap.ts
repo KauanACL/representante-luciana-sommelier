@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { Client as PgClient } from 'pg'
+import { BRAZIL_CITIES, BRAZIL_STATES } from '../src/data/brazilLocations'
 import { clientRevenueSeed, clientSeed } from '../src/data/seed'
+import { normalizeClientLocation, normalizeLocationKey } from '../src/lib/locations'
 
 const dbUrl = process.env.SUPABASE_DB_URL
 const dbHost = process.env.SUPABASE_DB_HOST
@@ -25,7 +27,7 @@ const pg = new PgClient({
 })
 
 const root = process.cwd()
-const migrationPath = path.join(root, 'supabase/migrations/001_initial_schema.sql')
+const migrationsPath = path.join(root, 'supabase/migrations')
 
 const toDateOrNull = (value: string) => {
   if (!value) return null
@@ -34,16 +36,57 @@ const toDateOrNull = (value: string) => {
 
 const toPeriodDate = (period: string) => `${period.replace('/', '-')}-01`
 
+const applyMigrations = async () => {
+  const files = (await fs.readdir(migrationsPath)).filter((file) => file.endsWith('.sql')).sort()
+
+  for (const file of files) {
+    const migration = await fs.readFile(path.join(migrationsPath, file), 'utf8')
+    await pg.query(migration)
+  }
+}
+
+const seedBrazilLocations = async () => {
+  for (const state of BRAZIL_STATES) {
+    await pg.query(
+      `
+        insert into public.brazil_states (ibge_id, code, name, normalized_name)
+        values ($1, $2, $3, $4)
+        on conflict (ibge_id) do update
+        set code = excluded.code,
+            name = excluded.name,
+            normalized_name = excluded.normalized_name
+      `,
+      [state.ibgeId, state.code, state.name, normalizeLocationKey(state.name)],
+    )
+  }
+
+  for (const city of BRAZIL_CITIES) {
+    await pg.query(
+      `
+        insert into public.brazil_cities (ibge_id, name, state_code, normalized_name)
+        values ($1, $2, $3, $4)
+        on conflict (ibge_id) do update
+        set name = excluded.name,
+            state_code = excluded.state_code,
+            normalized_name = excluded.normalized_name
+      `,
+      [city.ibgeId, city.name, city.stateCode, normalizeLocationKey(city.name)],
+    )
+  }
+}
+
 const main = async () => {
   await pg.connect()
   try {
-    const migration = await fs.readFile(migrationPath, 'utf8')
-    await pg.query(migration)
+    await applyMigrations()
 
     await pg.query('begin')
+    await seedBrazilLocations()
+
     await pg.query(`
       truncate table
         public.activities,
+        public.client_contacts,
         public.sommelier_services,
         public.sales,
         public.visits,
@@ -55,6 +98,7 @@ const main = async () => {
     const clientIdByLegacyId = new Map<string, string>()
 
     for (const client of clientSeed) {
+      const normalizedClient = normalizeClientLocation(client)
       const result = await pg.query<{ id: string }>(
         `
           insert into public.clients (
@@ -68,6 +112,8 @@ const main = async () => {
             district,
             city,
             state,
+            state_code,
+            city_ibge_id,
             zip_code,
             email,
             phone,
@@ -82,35 +128,37 @@ const main = async () => {
           values (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
             $11, $12, $13, $14, $15, $16, $17, $18,
-            $19, $20
+            $19, $20, $21, $22
           )
           returning id
         `,
         [
-          client.id,
-          client.document,
-          client.group,
-          client.name,
-          client.type === 'PF' ? 'PF' : 'PJ',
-          client.status,
-          client.address || null,
-          client.district || null,
-          client.city || null,
-          client.state || null,
-          client.zipCode || null,
-          client.email || null,
-          client.phone || null,
-          client.salesperson || null,
-          client.manager || null,
-          client.contactDescription || null,
-          client.lastImportedAction || null,
-          toDateOrNull(client.lastImportedActionDate),
-          client.createdAt,
-          client.updatedAt,
+          normalizedClient.id,
+          normalizedClient.document,
+          normalizedClient.group,
+          normalizedClient.name,
+          normalizedClient.type === 'PF' ? 'PF' : 'PJ',
+          normalizedClient.status,
+          normalizedClient.address || null,
+          normalizedClient.district || null,
+          normalizedClient.city || null,
+          normalizedClient.state || null,
+          normalizedClient.stateCode || null,
+          normalizedClient.cityIbgeId ?? null,
+          normalizedClient.zipCode || null,
+          normalizedClient.email || null,
+          normalizedClient.phone || null,
+          normalizedClient.salesperson || null,
+          normalizedClient.manager || null,
+          normalizedClient.contactDescription || null,
+          normalizedClient.lastImportedAction || null,
+          toDateOrNull(normalizedClient.lastImportedActionDate),
+          normalizedClient.createdAt,
+          normalizedClient.updatedAt,
         ],
       )
 
-      clientIdByLegacyId.set(client.id, result.rows[0].id)
+      clientIdByLegacyId.set(normalizedClient.id, result.rows[0].id)
     }
 
     for (const revenue of clientRevenueSeed) {
@@ -148,14 +196,18 @@ const main = async () => {
       periods: string
       visits: string
       sales: string
+      contacts: string
       services: string
     }>(`
       select
         (select count(*) from public.clients)::text as clients,
+        (select count(*) from public.brazil_states)::text as states,
+        (select count(*) from public.brazil_cities)::text as cities,
         (select count(*) from public.client_revenue_months)::text as revenue_rows,
         (select count(distinct period) from public.client_revenue_months)::text as periods,
         (select count(*) from public.visits)::text as visits,
         (select count(*) from public.sales)::text as sales,
+        (select count(*) from public.client_contacts)::text as contacts,
         (select count(*) from public.sommelier_services)::text as services
     `)
 

@@ -1,16 +1,23 @@
 import { clientRevenueSeed, clientSeed, revenuePeriods } from '../data/seed'
 import { createEmptyDatabaseState } from '../lib/databaseState'
+import { normalizeClientLocation, normalizeClientsLocation } from '../lib/locations'
 import type {
   Activity,
   Client,
+  ClientContact,
+  ControlActionInput,
   LocalDatabase,
   Sale,
   SommelierService,
   Visit,
 } from '../types/models'
 
-const STORAGE_KEY = 'luciana-sommelier-local-db-v2'
-const LEGACY_STORAGE_KEYS = ['luciana-sommelier-local-db-v1']
+const STORAGE_KEY = 'luciana-sommelier-local-db-v4'
+const LEGACY_STORAGE_KEYS = [
+  'luciana-sommelier-local-db-v3',
+  'luciana-sommelier-local-db-v2',
+  'luciana-sommelier-local-db-v1',
+]
 
 const now = () => new Date().toISOString()
 const makeId = (prefix: string) =>
@@ -38,7 +45,7 @@ const createInitialDatabase = (): LocalDatabase => ({
     role: 'owner',
   }),
   revenuePeriods: Array.from(revenuePeriods),
-  clients: clientSeed,
+  clients: normalizeClientsLocation(clientSeed),
   clientRevenueMonths: clientRevenueSeed,
   activities: [
     createActivity(
@@ -60,14 +67,35 @@ const clearLegacy = () => {
   }
 }
 
+const migrateDatabase = (database: LocalDatabase | (Omit<LocalDatabase, 'version'> & { version: number })) =>
+  ({
+    ...database,
+    version: 4,
+    clients: normalizeClientsLocation(database.clients),
+    contacts: 'contacts' in database && Array.isArray(database.contacts) ? database.contacts : [],
+  }) as LocalDatabase
+
 const sortByUpdated = <T extends { updatedAt: string }>(items: T[]) =>
   [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 
 export const localDataProvider = {
   load(): LocalDatabase {
-    clearLegacy()
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
+      for (const key of LEGACY_STORAGE_KEYS) {
+        const legacyRaw = localStorage.getItem(key)
+        if (!legacyRaw) continue
+
+        try {
+          const migrated = migrateDatabase(JSON.parse(legacyRaw))
+          save(migrated)
+          clearLegacy()
+          return migrated
+        } catch {
+          localStorage.removeItem(key)
+        }
+      }
+
       const fresh = createInitialDatabase()
       save(fresh)
       return fresh
@@ -75,8 +103,11 @@ export const localDataProvider = {
 
     try {
       const parsed = JSON.parse(raw) as LocalDatabase
-      if (parsed.version !== 2) throw new Error('Unsupported local database')
-      return parsed
+      if (parsed.version !== 4) throw new Error('Unsupported local database')
+      const normalized = migrateDatabase(parsed)
+      save(normalized)
+      clearLegacy()
+      return normalized
     } catch {
       const fresh = createInitialDatabase()
       save(fresh)
@@ -99,7 +130,7 @@ export const localDataProvider = {
   createClient(database: LocalDatabase, client: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>) {
     const timestamp = now()
     const created: Client = {
-      ...client,
+      ...normalizeClientLocation(client),
       id: makeId('client'),
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -116,7 +147,7 @@ export const localDataProvider = {
   },
 
   updateClient(database: LocalDatabase, client: Client) {
-    const updated = { ...client, updatedAt: now() }
+    const updated = { ...normalizeClientLocation(client), updatedAt: now() }
     return localDataProvider.commit({
       ...database,
       clients: database.clients.map((item) => (item.id === updated.id ? updated : item)),
@@ -170,6 +201,69 @@ export const localDataProvider = {
       sales: [created, ...database.sales],
       activities: [
         createActivity('sale', created.id, 'created', `Venda registrada: ${created.title}.`),
+        ...database.activities,
+      ],
+    })
+  },
+
+  registerControlAction(database: LocalDatabase, input: ControlActionInput) {
+    const timestamp = now()
+    const createdContact: ClientContact = {
+      ...input.contact,
+      id: makeId('contact'),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }
+    const createdSale: Sale | null = input.sale
+      ? {
+          ...input.sale,
+          closedAt:
+            input.sale.stage === 'won'
+              ? input.sale.closedAt ?? input.contact.contactAt
+              : undefined,
+          id: makeId('sale'),
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }
+      : null
+    const createdVisit: Visit | null = input.visit
+      ? {
+          ...input.visit,
+          id: makeId('visit'),
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }
+      : null
+
+    return localDataProvider.commit({
+      ...database,
+      contacts: [createdContact, ...database.contacts],
+      sales: createdSale ? [createdSale, ...database.sales] : database.sales,
+      visits: createdVisit ? [createdVisit, ...database.visits] : database.visits,
+      activities: [
+        createActivity('client', createdContact.clientId, 'control-action', 'Ação comercial registrada.'),
+        ...database.activities,
+      ],
+    })
+  },
+
+  createContact(
+    database: LocalDatabase,
+    contact: Omit<ClientContact, 'id' | 'createdAt' | 'updatedAt'>,
+  ) {
+    const timestamp = now()
+    const created: ClientContact = {
+      ...contact,
+      id: makeId('contact'),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }
+
+    return localDataProvider.commit({
+      ...database,
+      contacts: [created, ...database.contacts],
+      activities: [
+        createActivity('client', created.clientId, 'contact-created', 'Contato comercial registrado.'),
         ...database.activities,
       ],
     })

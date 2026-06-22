@@ -8,15 +8,15 @@ export const emptyProfile: UserProfile = {
 }
 
 export const createEmptyDatabaseState = (profile: UserProfile = emptyProfile): LocalDatabase => ({
-  version: 2,
+  version: 4,
   initializedAt: new Date().toISOString(),
   revenuePeriods: [],
   clients: [],
   clientRevenueMonths: [],
   visits: [],
   sales: [],
+  contacts: [],
   services: [],
   activities: [],
   profile,
 })
-

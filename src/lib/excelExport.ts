@@ -1,6 +1,13 @@
 import type * as XLSXType from 'xlsx'
-import { byId, periodFromDate, sum, wonSalesRevenueMetrics } from './analytics'
-import { formatDate, formatPeriod, formatShortDate, serviceTypeLabel, statusLabel } from './formatters'
+import { byId, periodFromDate, saleRevenueDate, sum, wonSalesRevenueMetrics } from './analytics'
+import {
+  contactChannelLabel,
+  formatDate,
+  formatPeriod,
+  formatShortDate,
+  serviceTypeLabel,
+  statusLabel,
+} from './formatters'
 import type { LocalDatabase } from '../types/models'
 
 type CellValue = string | number | boolean | Date
@@ -64,6 +71,10 @@ export const buildReportsWorkbook = async (database: LocalDatabase) => {
   const last12Revenue = sum(wonSalesRevenueMetrics(database.sales, 12).map((item) => item.amount))
   const salesAmount = sum(database.sales.map((sale) => sale.amount))
   const servicesAmount = sum(database.services.map((service) => service.amount))
+  const currentPeriod = periodFromDate(new Date())
+  const currentMonthContacts = database.contacts.filter(
+    (contact) => periodFromDate(contact.contactAt) === currentPeriod,
+  ).length
 
   appendSheet(XLSX, workbook, {
     name: 'Resumo',
@@ -85,6 +96,8 @@ export const buildReportsWorkbook = async (database: LocalDatabase) => {
       ['Vendas registradas', database.sales.length],
       ['Vendas ganhas', wonSales.length],
       ['Valor em vendas', salesAmount],
+      ['Contatos registrados', database.contacts.length],
+      ['Contatos no mês atual', currentMonthContacts],
       ['Visitas registradas', database.visits.length],
       ['Serviços registrados', database.services.length],
       ['Valor em serviços', servicesAmount],
@@ -127,7 +140,7 @@ export const buildReportsWorkbook = async (database: LocalDatabase) => {
     currencyColumns: [5],
     rows: wonSales.map((sale) => {
       const client = clientsMap.get(sale.clientId)
-      const period = periodFromDate(sale.expectedCloseDate)
+      const period = periodFromDate(saleRevenueDate(sale))
       return [
         client?.name ?? 'Cliente não encontrado',
         client?.document ?? '',
@@ -135,6 +148,36 @@ export const buildReportsWorkbook = async (database: LocalDatabase) => {
         period,
         formatPeriod(period),
         sale.amount,
+        client?.city ?? '',
+        client?.state ?? '',
+        client?.group ?? '',
+      ]
+    }),
+  })
+
+  appendSheet(XLSX, workbook, {
+    name: 'Contatos',
+    headers: [
+      'Cliente',
+      'Documento',
+      'Data',
+      'Canal',
+      'Resultado',
+      'Observações',
+      'Cidade',
+      'UF',
+      'Grupo',
+    ],
+    widths: [34, 20, 22, 16, 24, 42, 24, 8, 12],
+    rows: database.contacts.map((contact) => {
+      const client = clientsMap.get(contact.clientId)
+      return [
+        client?.name ?? 'Cliente não encontrado',
+        client?.document ?? '',
+        safeDate(contact.contactAt, true),
+        contactChannelLabel(contact.channel),
+        statusLabel(contact.outcome),
+        contact.notes,
         client?.city ?? '',
         client?.state ?? '',
         client?.group ?? '',

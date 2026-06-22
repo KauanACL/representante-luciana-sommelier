@@ -1,9 +1,14 @@
 import { createEmptyDatabaseState } from '../lib/databaseState'
+import { normalizeClientLocation } from '../lib/locations'
 import { supabase } from '../lib/supabaseClient'
 import type {
   Activity,
   Client,
+  ClientContact,
   ClientStatus,
+  ContactChannel,
+  ContactOutcome,
+  ControlActionInput,
   LocalDatabase,
   Sale,
   SaleStage,
@@ -26,6 +31,8 @@ type ClientRow = {
   district: string | null
   city: string | null
   state: string | null
+  state_code: string | null
+  city_ibge_id: number | null
   zip_code: string | null
   email: string | null
   phone: string | null
@@ -64,6 +71,18 @@ type SaleRow = {
   amount: number | string
   stage: SaleStage
   expected_close_date: string
+  closed_at: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+type ContactRow = {
+  id: string
+  client_id: string
+  contact_at: string
+  channel: ContactChannel
+  outcome: ContactOutcome
   notes: string | null
   created_at: string
   updated_at: string
@@ -103,28 +122,31 @@ const toPeriodLabel = (period: string) => period.slice(0, 7).replace('-', '/')
 
 const toPeriodDate = (period: string) => `${period.replace('/', '-')}-01`
 
-const mapClient = (row: ClientRow): Client => ({
-  id: row.id,
-  document: row.document,
-  group: row.group_name,
-  name: row.name,
-  type: row.client_type,
-  status: row.status,
-  address: row.address ?? '',
-  district: row.district ?? '',
-  city: row.city ?? '',
-  state: row.state ?? '',
-  zipCode: row.zip_code ?? '',
-  email: row.email ?? '',
-  phone: row.phone ?? '',
-  salesperson: row.salesperson ?? '',
-  manager: row.manager ?? '',
-  contactDescription: row.contact_description ?? '',
-  lastImportedAction: row.last_imported_action ?? '',
-  lastImportedActionDate: row.last_imported_action_date ?? '',
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-})
+const mapClient = (row: ClientRow): Client =>
+  normalizeClientLocation({
+    id: row.id,
+    document: row.document,
+    group: row.group_name,
+    name: row.name,
+    type: row.client_type,
+    status: row.status,
+    address: row.address ?? '',
+    district: row.district ?? '',
+    city: row.city ?? '',
+    state: row.state ?? '',
+    stateCode: row.state_code ?? row.state ?? '',
+    cityIbgeId: row.city_ibge_id,
+    zipCode: row.zip_code ?? '',
+    email: row.email ?? '',
+    phone: row.phone ?? '',
+    salesperson: row.salesperson ?? '',
+    manager: row.manager ?? '',
+    contactDescription: row.contact_description ?? '',
+    lastImportedAction: row.last_imported_action ?? '',
+    lastImportedActionDate: row.last_imported_action_date ?? '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  })
 
 const toClientInsert = (client: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>) => ({
   document: client.document,
@@ -136,6 +158,8 @@ const toClientInsert = (client: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>) 
   district: client.district,
   city: client.city,
   state: client.state,
+  state_code: client.stateCode || client.state || null,
+  city_ibge_id: client.cityIbgeId ?? null,
   zip_code: client.zipCode,
   email: client.email,
   phone: client.phone,
@@ -186,6 +210,7 @@ const mapSale = (row: SaleRow): Sale => ({
   amount: toMoney(row.amount),
   stage: row.stage,
   expectedCloseDate: row.expected_close_date,
+  closedAt: row.closed_at ?? undefined,
   notes: row.notes ?? '',
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -197,7 +222,27 @@ const toSaleInsert = (sale: Omit<Sale, 'id' | 'createdAt' | 'updatedAt'>) => ({
   amount: sale.amount,
   stage: sale.stage,
   expected_close_date: sale.expectedCloseDate,
+  closed_at: sale.stage === 'won' ? sale.closedAt ?? new Date().toISOString() : null,
   notes: sale.notes,
+})
+
+const mapContact = (row: ContactRow): ClientContact => ({
+  id: row.id,
+  clientId: row.client_id,
+  contactAt: row.contact_at,
+  channel: row.channel,
+  outcome: row.outcome,
+  notes: row.notes ?? '',
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const toContactInsert = (contact: Omit<ClientContact, 'id' | 'createdAt' | 'updatedAt'>) => ({
+  client_id: contact.clientId,
+  contact_at: contact.contactAt,
+  channel: contact.channel,
+  outcome: contact.outcome,
+  notes: contact.notes,
 })
 
 const mapService = (row: ServiceRow): SommelierService => ({
@@ -261,6 +306,7 @@ export const supabaseDataProvider = {
       revenueResult,
       visitsResult,
       salesResult,
+      contactsResult,
       servicesResult,
       activitiesResult,
     ] = await Promise.all([
@@ -271,6 +317,7 @@ export const supabaseDataProvider = {
       client.from('client_revenue_months').select('*').order('period', { ascending: true }),
       client.from('visits').select('*').order('scheduled_for', { ascending: true }),
       client.from('sales').select('*').order('updated_at', { ascending: false }),
+      client.from('client_contacts').select('*').order('contact_at', { ascending: false }),
       client.from('sommelier_services').select('*').order('scheduled_for', { ascending: true }),
       client.from('activities').select('*').order('created_at', { ascending: false }).limit(100),
     ])
@@ -280,6 +327,7 @@ export const supabaseDataProvider = {
     assertNoError(revenueResult.error)
     assertNoError(visitsResult.error)
     assertNoError(salesResult.error)
+    assertNoError(contactsResult.error)
     assertNoError(servicesResult.error)
     assertNoError(activitiesResult.error)
 
@@ -302,6 +350,7 @@ export const supabaseDataProvider = {
       clientRevenueMonths: revenue,
       visits: (visitsResult.data ?? []).map((row) => mapVisit(row as VisitRow)),
       sales: (salesResult.data ?? []).map((row) => mapSale(row as SaleRow)),
+      contacts: (contactsResult.data ?? []).map((row) => mapContact(row as ContactRow)),
       services: (servicesResult.data ?? []).map((row) => mapService(row as ServiceRow)),
       activities: (activitiesResult.data ?? []).map((row) => mapActivity(row as ActivityRow)),
     }
@@ -354,6 +403,34 @@ export const supabaseDataProvider = {
     return supabaseDataProvider.load()
   },
 
+  async registerControlAction(input: ControlActionInput) {
+    const { error } = await assertSupabase().rpc('register_control_action', {
+      p_client_id: input.contact.clientId,
+      p_contact_at: input.contact.contactAt,
+      p_channel: input.contact.channel,
+      p_outcome: input.contact.outcome,
+      p_notes: input.contact.notes,
+      p_sale_title: input.sale?.title ?? null,
+      p_sale_amount: input.sale?.amount ?? null,
+      p_sale_stage: input.sale?.stage ?? null,
+      p_sale_expected_close_date: input.sale?.expectedCloseDate ?? null,
+      p_sale_closed_at: input.sale?.closedAt ?? null,
+      p_visit_scheduled_for: input.visit?.scheduledFor ?? null,
+      p_visit_purpose: input.visit?.purpose ?? null,
+      p_visit_notes: input.visit?.notes ?? null,
+    })
+    assertNoError(error)
+    return supabaseDataProvider.load()
+  },
+
+  async createContact(contact: Omit<ClientContact, 'id' | 'createdAt' | 'updatedAt'>) {
+    const { error } = await assertSupabase()
+      .from('client_contacts')
+      .insert(toContactInsert(contact))
+    assertNoError(error)
+    return supabaseDataProvider.load()
+  },
+
   async createService(service: Omit<SommelierService, 'id' | 'createdAt' | 'updatedAt'>) {
     const { error } = await assertSupabase()
       .from('sommelier_services')
@@ -373,4 +450,3 @@ export const supabaseDataProvider = {
 
   toPeriodDate,
 }
-

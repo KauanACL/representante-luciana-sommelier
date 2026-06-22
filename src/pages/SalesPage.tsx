@@ -15,12 +15,14 @@ const saleSchema = z.object({
   amount: z.number().min(0, 'Valor invalido.'),
   stage: z.enum(['lead', 'proposal', 'won', 'lost']),
   expectedCloseDate: z.string().min(1, 'Informe a data prevista.'),
+  closedAt: z.string().optional(),
   notes: z.string().optional(),
 })
 
 type SaleForm = z.infer<typeof saleSchema>
 
 const defaultDate = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+const today = () => new Date().toISOString().slice(0, 10)
 
 export function SalesPage() {
   const { clients, sales, createSale, updateSale } = useData()
@@ -33,10 +35,12 @@ export function SalesPage() {
       amount: 0,
       stage: 'proposal',
       expectedCloseDate: defaultDate(),
+      closedAt: today(),
       notes: '',
     },
   })
   const selectedClientId = useWatch({ control: form.control, name: 'clientId' })
+  const selectedStage = useWatch({ control: form.control, name: 'stage' })
 
   useEffect(() => {
     if (clients[0]?.id && !form.getValues('clientId')) {
@@ -48,6 +52,10 @@ export function SalesPage() {
     await createSale({
       ...values,
       expectedCloseDate: new Date(`${values.expectedCloseDate}T12:00:00`).toISOString(),
+      closedAt:
+        values.stage === 'won'
+          ? new Date(`${values.closedAt || values.expectedCloseDate}T12:00:00`).toISOString()
+          : undefined,
       notes: values.notes ?? '',
     })
     form.reset({
@@ -56,6 +64,7 @@ export function SalesPage() {
       amount: 0,
       stage: 'proposal',
       expectedCloseDate: defaultDate(),
+      closedAt: today(),
       notes: '',
     })
   })
@@ -104,6 +113,12 @@ export function SalesPage() {
             Previsão
             <input type="date" {...form.register('expectedCloseDate')} />
           </label>
+          {selectedStage === 'won' && (
+            <label>
+              Data de fechamento
+              <input type="date" {...form.register('closedAt')} />
+            </label>
+          )}
           <label>
             Observações
             <textarea rows={4} {...form.register('notes')} />
@@ -138,7 +153,7 @@ export function SalesPage() {
                     <button
                       type="button"
                       className="secondary-button"
-                      onClick={() => updateSale({ ...sale, stage: 'won' })}
+                      onClick={() => updateSale({ ...sale, stage: 'won', closedAt: new Date().toISOString() })}
                     >
                       <CheckCircle2 size={16} />
                       Ganhar
@@ -146,7 +161,7 @@ export function SalesPage() {
                     <button
                       type="button"
                       className="ghost-button"
-                      onClick={() => updateSale({ ...sale, stage: 'lost' })}
+                      onClick={() => updateSale({ ...sale, stage: 'lost', closedAt: undefined })}
                     >
                       <XCircle size={16} />
                       Perder

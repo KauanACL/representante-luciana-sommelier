@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  BellRing,
   CalendarDays,
   ClipboardList,
   LayoutDashboard,
@@ -17,6 +18,7 @@ import { useData } from '../context/DataContext'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/controle', label: 'Controle', icon: BellRing },
   { to: '/clientes', label: 'Clientes', icon: Users },
   { to: '/visitas', label: 'Visitas', icon: CalendarDays },
   { to: '/vendas', label: 'Vendas', icon: Store },
@@ -28,6 +30,7 @@ const navItems = [
 
 const titles: Record<string, string> = {
   '/': 'Dashboard',
+  '/controle': 'Controle',
   '/clientes': 'Clientes',
   '/visitas': 'Visitas',
   '/vendas': 'Vendas',

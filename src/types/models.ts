@@ -11,6 +11,8 @@ export type Client = {
   district: string
   city: string
   state: string
+  stateCode?: string
+  cityIbgeId?: number | null
   zipCode: string
   email: string
   phone: string
@@ -53,9 +55,40 @@ export type Sale = {
   amount: number
   stage: SaleStage
   expectedCloseDate: string
+  closedAt?: string
   notes: string
   createdAt: string
   updatedAt: string
+}
+
+export type ContactChannel = 'whatsapp' | 'phone' | 'email' | 'in_person' | 'other'
+
+export type ContactOutcome =
+  | 'contacted'
+  | 'responded'
+  | 'lead'
+  | 'proposal'
+  | 'proposal_later'
+  | 'sale'
+  | 'return_scheduled'
+  | 'no_answer'
+  | 'not_interested'
+
+export type ClientContact = {
+  id: string
+  clientId: string
+  contactAt: string
+  channel: ContactChannel
+  outcome: ContactOutcome
+  notes: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type ControlActionInput = {
+  contact: Omit<ClientContact, 'id' | 'createdAt' | 'updatedAt'>
+  sale?: Omit<Sale, 'id' | 'createdAt' | 'updatedAt'>
+  visit?: Omit<Visit, 'id' | 'createdAt' | 'updatedAt'>
 }
 
 export type SommelierServiceType =
@@ -95,13 +128,14 @@ export type UserProfile = {
 }
 
 export type LocalDatabase = {
-  version: 2
+  version: 4
   initializedAt: string
   revenuePeriods: string[]
   clients: Client[]
   clientRevenueMonths: ClientRevenueMonth[]
   visits: Visit[]
   sales: Sale[]
+  contacts: ClientContact[]
   services: SommelierService[]
   activities: Activity[]
   profile: UserProfile

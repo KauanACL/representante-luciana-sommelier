@@ -1,66 +1,114 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Plus, Search, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { z } from 'zod'
 import { EmptyState } from '../components/EmptyState'
+import { LocationSelect } from '../components/LocationSelect'
 import { StatusBadge } from '../components/StatusBadge'
 import { useData } from '../context/DataContext'
 import { compactDocument, normalizeSearch } from '../lib/formatters'
+import {
+  normalizeLocationKey,
+  resolveLocationFromCityId,
+  resolveStateCode,
+} from '../lib/locations'
+import type { Client } from '../types/models'
 
-const clientSchema = z.object({
-  name: z.string().min(2, 'Informe o nome.'),
-  document: z.string().min(3, 'Informe CNPJ, CPF ou identificador.'),
-  type: z.string().min(1),
-  group: z.string().min(1),
-  status: z.enum(['active', 'inactive', 'prospect', 'attention']),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  email: z.string().optional(),
-  phone: z.string().optional(),
-  address: z.string().optional(),
-})
+const getClientStateCode = (client: Client) => resolveStateCode(client.stateCode || client.state)
+
+const getClientCityFilterValue = (client: Client) => {
+  const stateCode = getClientStateCode(client)
+  if (!client.city) return ''
+  if (client.cityIbgeId) return `id:${client.cityIbgeId}`
+  return `${stateCode}:${normalizeLocationKey(client.city)}`
+}
+
+const clientSchema = z
+  .object({
+    name: z.string().min(2, 'Informe o nome.'),
+    document: z.string().min(3, 'Informe CNPJ, CPF ou identificador.'),
+    type: z.string().min(1),
+    group: z.string().min(1),
+    status: z.enum(['active', 'inactive', 'prospect', 'attention']),
+    stateCode: z.string().min(2, 'Escolha a UF.'),
+    cityIbgeId: z.number().nullable(),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+    address: z.string().optional(),
+  })
+  .superRefine((values, context) => {
+    if (values.cityIbgeId === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['cityIbgeId'],
+        message: 'Escolha a cidade.',
+      })
+    }
+  })
 
 type ClientForm = z.infer<typeof clientSchema>
 
 export function ClientsPage() {
   const { clients, createClient } = useData()
   const [query, setQuery] = useState('')
+  const [stateFilter, setStateFilter] = useState('all')
   const [cityFilter, setCityFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [showForm, setShowForm] = useState(false)
-  const { register, handleSubmit, reset, formState } = useForm<ClientForm>({
+  const { register, handleSubmit, reset, formState, control, setValue } = useForm<ClientForm>({
     resolver: zodResolver(clientSchema),
     defaultValues: {
       type: 'PJ',
       group: 'ON',
       status: 'active',
+      stateCode: 'MG',
+      cityIbgeId: null,
     },
   })
+  const selectedStateCode = useWatch({ control, name: 'stateCode' }) ?? ''
+  const selectedCityIbgeId = useWatch({ control, name: 'cityIbgeId' }) ?? null
+
+  const stateOptions = useMemo(() => {
+    const states = new Set<string>()
+    clients.forEach((client) => {
+      const stateCode = getClientStateCode(client)
+      if (stateCode) states.add(stateCode)
+    })
+
+    return Array.from(states).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [clients])
 
   const cityOptions = useMemo(() => {
-    const cities = new Map<string, string>()
+    const cities = new Map<string, { value: string; label: string }>()
 
     clients.forEach((client) => {
       const city = client.city.trim()
       if (!city) return
-      const normalizedCity = normalizeSearch(city)
-      if (!cities.has(normalizedCity)) {
-        cities.set(normalizedCity, city)
+      const stateCode = getClientStateCode(client)
+      if (stateFilter !== 'all' && stateCode !== stateFilter) return
+
+      const value = getClientCityFilterValue(client)
+      if (!cities.has(value)) {
+        cities.set(value, {
+          value,
+          label: stateFilter === 'all' && stateCode ? `${city} / ${stateCode}` : city,
+        })
       }
     })
 
-    return Array.from(cities, ([value, label]) => ({ value, label })).sort((a, b) =>
+    return Array.from(cities.values()).sort((a, b) =>
       a.label.localeCompare(b.label, 'pt-BR'),
     )
-  }, [clients])
+  }, [clients, stateFilter])
 
   const matchingClients = useMemo(() => {
     const normalized = normalizeSearch(query)
     return clients
-      .filter((client) => cityFilter === 'all' || normalizeSearch(client.city) === cityFilter)
+      .filter((client) => stateFilter === 'all' || getClientStateCode(client) === stateFilter)
+      .filter((client) => cityFilter === 'all' || getClientCityFilterValue(client) === cityFilter)
       .filter((client) => typeFilter === 'all' || client.type.toUpperCase() === typeFilter)
       .filter((client) => statusFilter === 'all' || client.status === statusFilter)
       .filter((client) => {
@@ -69,20 +117,25 @@ export function ClientsPage() {
           `${client.name} ${client.city} ${client.state} ${client.group} ${client.document}`,
         ).includes(normalized)
       })
-  }, [cityFilter, clients, query, statusFilter, typeFilter])
+  }, [cityFilter, clients, query, stateFilter, statusFilter, typeFilter])
 
   const visibleClients = useMemo(() => matchingClients.slice(0, 120), [matchingClients])
   const hasDisplayLimit = matchingClients.length > visibleClients.length
 
   const onSubmit = handleSubmit(async (values) => {
+    const location = resolveLocationFromCityId(values.cityIbgeId)
+    if (!location) return
+
     await createClient({
       name: values.name,
       document: values.document,
       type: values.type,
       group: values.group,
       status: values.status,
-      city: values.city ?? '',
-      state: values.state?.toUpperCase() ?? '',
+      city: location.city,
+      state: location.state,
+      stateCode: location.stateCode,
+      cityIbgeId: location.cityIbgeId,
       email: values.email ?? '',
       phone: values.phone ?? '',
       address: values.address ?? '',
@@ -109,6 +162,20 @@ export function ClientsPage() {
             placeholder="Buscar cliente ou documento"
           />
         </label>
+        <select
+          value={stateFilter}
+          onChange={(event) => {
+            setStateFilter(event.target.value)
+            setCityFilter('all')
+          }}
+        >
+          <option value="all">Todas as UFs</option>
+          {stateOptions.map((stateCode) => (
+            <option key={stateCode} value={stateCode}>
+              {stateCode}
+            </option>
+          ))}
+        </select>
         <select value={cityFilter} onChange={(event) => setCityFilter(event.target.value)}>
           <option value="all">Todas as cidades</option>
           {cityOptions.map((city) => (
@@ -180,14 +247,22 @@ export function ClientsPage() {
                 <option value="inactive">Inativo</option>
               </select>
             </label>
-            <label>
-              Cidade
-              <input {...register('city')} />
-            </label>
-            <label>
-              UF
-              <input maxLength={2} {...register('state')} />
-            </label>
+            <LocationSelect
+              stateCode={selectedStateCode}
+              cityIbgeId={selectedCityIbgeId}
+              stateError={formState.errors.stateCode?.message}
+              cityError={formState.errors.cityIbgeId?.message}
+              onChange={(location) => {
+                setValue('stateCode', location.stateCode, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+                setValue('cityIbgeId', location.cityIbgeId, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+              }}
+            />
             <label>
               Email
               <input type="email" {...register('email')} />

@@ -12,13 +12,22 @@ import { createEmptyDatabaseState } from '../lib/databaseState'
 import { isSupabaseConfigured } from '../lib/supabaseClient'
 import { localDataProvider } from '../providers/localDataProvider'
 import { supabaseDataProvider } from '../providers/supabaseDataProvider'
-import type { Client, LocalDatabase, Sale, SommelierService, Visit } from '../types/models'
+import type {
+  Client,
+  ClientContact,
+  ControlActionInput,
+  LocalDatabase,
+  Sale,
+  SommelierService,
+  Visit,
+} from '../types/models'
 
 type DataContextValue = {
   database: LocalDatabase
   clients: Client[]
   visits: Visit[]
   sales: Sale[]
+  contacts: ClientContact[]
   services: SommelierService[]
   isLoading: boolean
   error: string
@@ -30,6 +39,8 @@ type DataContextValue = {
   updateVisit: (visit: Visit) => Promise<void>
   createSale: (sale: Omit<Sale, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   updateSale: (sale: Sale) => Promise<void>
+  registerControlAction: (input: ControlActionInput) => Promise<void>
+  createContact: (contact: Omit<ClientContact, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   createService: (service: Omit<SommelierService, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   updateService: (service: SommelierService) => Promise<void>
   resetLocalData: () => void
@@ -151,6 +162,35 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const createContact = useCallback(
+    async (contact: Omit<ClientContact, 'id' | 'createdAt' | 'updatedAt'>) => {
+      setError('')
+      try {
+        if (isSupabaseConfigured) {
+          setDatabase(await supabaseDataProvider.createContact(contact))
+        } else {
+          setDatabase((current) => localDataProvider.createContact(current, contact))
+        }
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : 'Nao foi possivel registrar contato.')
+      }
+    },
+    [],
+  )
+
+  const registerControlAction = useCallback(async (input: ControlActionInput) => {
+    setError('')
+    try {
+      if (isSupabaseConfigured) {
+        setDatabase(await supabaseDataProvider.registerControlAction(input))
+      } else {
+        setDatabase((current) => localDataProvider.registerControlAction(current, input))
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Nao foi possivel registrar acao comercial.')
+    }
+  }, [])
+
   const createService = useCallback(
     async (service: Omit<SommelierService, 'id' | 'createdAt' | 'updatedAt'>) => {
       setError('')
@@ -194,6 +234,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       clients: database.clients,
       visits: database.visits,
       sales: database.sales,
+      contacts: database.contacts,
       services: database.services,
       isLoading,
       error,
@@ -205,12 +246,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateVisit,
       createSale,
       updateSale,
+      registerControlAction,
+      createContact,
       createService,
       updateService,
       resetLocalData,
     }),
     [
       createClient,
+      createContact,
       createSale,
       createService,
       createVisit,
@@ -218,6 +262,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       error,
       isLoading,
       refresh,
+      registerControlAction,
       resetLocalData,
       updateClient,
       updateSale,

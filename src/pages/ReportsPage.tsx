@@ -54,7 +54,7 @@ export function ReportsPage() {
       <section className="panel report-export-panel">
         <div>
           <h2>Exportar dados</h2>
-          <p>Baixe clientes, faturamento, vendas, visitas e serviços em um único Excel.</p>
+          <p>Baixe clientes, contatos, faturamento, vendas, visitas e serviços em um único Excel.</p>
         </div>
         <button
           type="button"

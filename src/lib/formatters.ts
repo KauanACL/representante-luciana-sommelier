@@ -87,8 +87,26 @@ export const statusLabel = (status: string) => {
     proposal: 'Proposta',
     won: 'Ganha',
     lost: 'Perdida',
+    contacted: 'Contato feito',
+    responded: 'Respondeu',
+    sale: 'Venda',
+    return_scheduled: 'Pediu retorno',
+    no_answer: 'Não respondeu',
+    not_interested: 'Sem interesse',
+    proposal_later: 'Enviar proposta depois',
   }
   return labels[status] ?? status
+}
+
+export const contactChannelLabel = (channel: string) => {
+  const labels: Record<string, string> = {
+    whatsapp: 'WhatsApp',
+    phone: 'Telefone',
+    email: 'Email',
+    in_person: 'Presencial',
+    other: 'Outro',
+  }
+  return labels[channel] ?? channel
 }
 
 export const serviceTypeLabel = (type: string) => {

@@ -11,6 +11,9 @@ const DashboardPage = lazy(() =>
 const ClientsPage = lazy(() =>
   import('./pages/ClientsPage').then((module) => ({ default: module.ClientsPage })),
 )
+const ControlPage = lazy(() =>
+  import('./pages/ControlPage').then((module) => ({ default: module.ControlPage })),
+)
 const ClientDetailPage = lazy(() =>
   import('./pages/ClientDetailPage').then((module) => ({ default: module.ClientDetailPage })),
 )
@@ -46,6 +49,7 @@ function ProtectedApp() {
         <Routes>
           <Route element={<AppShell />}>
             <Route index element={<DashboardPage />} />
+            <Route path="controle" element={<ControlPage />} />
             <Route path="clientes" element={<ClientsPage />} />
             <Route path="clientes/:id" element={<ClientDetailPage />} />
             <Route path="visitas" element={<VisitsPage />} />

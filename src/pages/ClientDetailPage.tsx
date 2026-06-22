@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ArrowLeft, CircleDollarSign, Save } from 'lucide-react'
+import { ArrowLeft, CircleDollarSign, MessageCircle, Save } from 'lucide-react'
 import { useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import {
   Bar,
@@ -14,17 +14,21 @@ import {
 } from 'recharts'
 import { z } from 'zod'
 import { EmptyState } from '../components/EmptyState'
+import { LocationSelect } from '../components/LocationSelect'
 import { StatusBadge } from '../components/StatusBadge'
 import { useData } from '../context/DataContext'
 import { wonSalesRevenueMetrics } from '../lib/analytics'
 import {
   compactDocument,
+  contactChannelLabel,
   formatCurrency,
   formatDate,
   formatPeriod,
   formatShortDate,
   serviceTypeLabel,
+  statusLabel,
 } from '../lib/formatters'
+import { resolveLocation, resolveLocationFromCityId } from '../lib/locations'
 import type { ClientStatus } from '../types/models'
 
 const editSchema = z.object({
@@ -33,8 +37,8 @@ const editSchema = z.object({
   type: z.string(),
   group: z.string(),
   status: z.enum(['active', 'inactive', 'prospect', 'attention']),
-  city: z.string(),
-  state: z.string(),
+  stateCode: z.string().optional(),
+  cityIbgeId: z.number().nullable().optional(),
   email: z.string(),
   phone: z.string(),
   address: z.string(),
@@ -47,22 +51,31 @@ type EditForm = z.infer<typeof editSchema>
 
 export function ClientDetailPage() {
   const { id } = useParams()
-  const { clients, visits, sales, services, updateClient } = useData()
+  const { clients, visits, sales, contacts, services, updateClient } = useData()
   const client = clients.find((item) => item.id === id)
   const form = useForm<EditForm>({
     resolver: zodResolver(editSchema),
   })
+  const selectedStateCode = useWatch({ control: form.control, name: 'stateCode' }) ?? ''
+  const selectedCityIbgeId = useWatch({ control: form.control, name: 'cityIbgeId' }) ?? null
 
   useEffect(() => {
     if (!client) return
+    const location = resolveLocation({
+      city: client.city,
+      state: client.state,
+      stateCode: client.stateCode,
+      cityIbgeId: client.cityIbgeId,
+    })
+
     form.reset({
       name: client.name,
       document: client.document,
       type: client.type,
       group: client.group,
       status: client.status,
-      city: client.city,
-      state: client.state,
+      stateCode: location.stateCode,
+      cityIbgeId: location.cityIbgeId,
       email: client.email,
       phone: client.phone,
       address: client.address,
@@ -76,7 +89,40 @@ export function ClientDetailPage() {
 
   const clientVisits = visits.filter((visit) => visit.clientId === client.id)
   const clientSales = sales.filter((sale) => sale.clientId === client.id)
+  const clientContacts = contacts
+    .filter((contact) => contact.clientId === client.id)
+    .sort((a, b) => b.contactAt.localeCompare(a.contactAt))
   const clientServices = services.filter((service) => service.clientId === client.id)
+  const operationalHistory = [
+    ...clientContacts.map((contact) => ({
+      id: `contact-${contact.id}`,
+      date: contact.contactAt,
+      title: statusLabel(contact.outcome),
+      detail: `Contato | ${contactChannelLabel(contact.channel)}`,
+      note: contact.notes,
+    })),
+    ...clientVisits.map((visit) => ({
+      id: `visit-${visit.id}`,
+      date: visit.scheduledFor,
+      title: visit.purpose,
+      detail: `Visita | ${formatDate(visit.scheduledFor)}`,
+      note: visit.notes,
+    })),
+    ...clientSales.map((sale) => ({
+      id: `sale-${sale.id}`,
+      date: sale.closedAt || sale.expectedCloseDate,
+      title: sale.title,
+      detail: `Venda | ${formatCurrency(sale.amount)}`,
+      note: statusLabel(sale.stage),
+    })),
+    ...clientServices.map((service) => ({
+      id: `service-${service.id}`,
+      date: service.scheduledFor,
+      title: serviceTypeLabel(service.type),
+      detail: `Serviço | ${formatShortDate(service.scheduledFor)}`,
+      note: statusLabel(service.status),
+    })),
+  ].sort((a, b) => b.date.localeCompare(a.date))
   const chartData = wonSalesRevenueMetrics(clientSales, 12).map((item) => ({
     ...item,
     label: formatPeriod(item.period),
@@ -86,11 +132,18 @@ export function ClientDetailPage() {
     .reduce((total, sale) => total + sale.amount, 0)
 
   const onSubmit = form.handleSubmit(async (values) => {
+    const selectedLocation =
+      resolveLocationFromCityId(values.cityIbgeId ?? null) ??
+      resolveLocation({ state: values.stateCode ?? client.stateCode ?? client.state })
+
     await updateClient({
       ...client,
       ...values,
       status: values.status as ClientStatus,
-      state: values.state.toUpperCase(),
+      city: selectedLocation.city,
+      state: selectedLocation.state,
+      stateCode: selectedLocation.stateCode,
+      cityIbgeId: selectedLocation.cityIbgeId,
     })
   })
 
@@ -149,14 +202,21 @@ export function ClientDetailPage() {
               <option value="inactive">Inativo</option>
             </select>
           </label>
-          <label>
-            Cidade
-            <input {...form.register('city')} />
-          </label>
-          <label>
-            UF
-            <input maxLength={2} {...form.register('state')} />
-          </label>
+          <LocationSelect
+            allowEmptyCity
+            stateCode={selectedStateCode}
+            cityIbgeId={selectedCityIbgeId}
+            onChange={(location) => {
+              form.setValue('stateCode', location.stateCode, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+              form.setValue('cityIbgeId', location.cityIbgeId, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }}
+          />
           <label>
             CEP
             <input {...form.register('zipCode')} />
@@ -188,6 +248,38 @@ export function ClientDetailPage() {
             </button>
           </div>
         </form>
+      </section>
+
+      <section className="panel">
+        <div className="panel__header">
+          <div>
+            <h2>Histórico de contatos</h2>
+            <p>Últimas conversas, retornos e resultados comerciais desse cliente.</p>
+          </div>
+        </div>
+        {clientContacts.length ? (
+          <div className="record-list">
+            {clientContacts.slice(0, 8).map((contact) => (
+              <article key={contact.id} className="record-row">
+                <div>
+                  <strong>{statusLabel(contact.outcome)}</strong>
+                  <span>{contactChannelLabel(contact.channel)}</span>
+                  <time>{formatDate(contact.contactAt)}</time>
+                  {contact.notes && <small>{contact.notes}</small>}
+                </div>
+                <div className="record-row__actions">
+                  <StatusBadge status={contact.outcome} />
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            icon={MessageCircle}
+            title="Sem contatos registrados"
+            description="Os contatos feitos pelo Controle vão aparecer aqui."
+          />
+        )}
       </section>
 
       <div className="two-column">
@@ -235,25 +327,14 @@ export function ClientDetailPage() {
             </div>
           </div>
           <div className="mini-feed">
-            {clientVisits.slice(0, 3).map((visit) => (
-              <article key={visit.id}>
-                <strong>{visit.purpose}</strong>
-                <span>Visita | {formatDate(visit.scheduledFor)}</span>
+            {operationalHistory.slice(0, 8).map((item) => (
+              <article key={item.id}>
+                <strong>{item.title}</strong>
+                <span>{item.detail}</span>
+                {item.note && <small>{item.note}</small>}
               </article>
             ))}
-            {clientSales.slice(0, 3).map((sale) => (
-              <article key={sale.id}>
-                <strong>{sale.title}</strong>
-                <span>Venda | {formatCurrency(sale.amount)}</span>
-              </article>
-            ))}
-            {clientServices.slice(0, 3).map((service) => (
-              <article key={service.id}>
-                <strong>{serviceTypeLabel(service.type)}</strong>
-                <span>Serviço | {formatShortDate(service.scheduledFor)}</span>
-              </article>
-            ))}
-            {!clientVisits.length && !clientSales.length && !clientServices.length && (
+            {!operationalHistory.length && (
               <span>Nenhum lançamento manual para este cliente.</span>
             )}
           </div>
