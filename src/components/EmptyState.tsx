@@ -1,0 +1,18 @@
+import type { LucideIcon } from 'lucide-react'
+
+type Props = {
+  icon: LucideIcon
+  title: string
+  description: string
+}
+
+export function EmptyState({ icon: Icon, title, description }: Props) {
+  return (
+    <div className="empty-state">
+      <Icon size={24} />
+      <strong>{title}</strong>
+      <span>{description}</span>
+    </div>
+  )
+}
+
