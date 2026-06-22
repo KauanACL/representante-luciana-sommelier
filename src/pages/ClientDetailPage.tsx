@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ArrowLeft, Save } from 'lucide-react'
+import { ArrowLeft, CircleDollarSign, Save } from 'lucide-react'
 import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { Link, Navigate, useParams } from 'react-router-dom'
@@ -13,9 +13,10 @@ import {
   BarChart,
 } from 'recharts'
 import { z } from 'zod'
+import { EmptyState } from '../components/EmptyState'
 import { StatusBadge } from '../components/StatusBadge'
 import { useData } from '../context/DataContext'
-import { clientRevenueSeries } from '../lib/analytics'
+import { wonSalesRevenueMetrics } from '../lib/analytics'
 import {
   compactDocument,
   formatCurrency,
@@ -46,7 +47,7 @@ type EditForm = z.infer<typeof editSchema>
 
 export function ClientDetailPage() {
   const { id } = useParams()
-  const { database, clients, visits, sales, services, updateClient } = useData()
+  const { clients, visits, sales, services, updateClient } = useData()
   const client = clients.find((item) => item.id === id)
   const form = useForm<EditForm>({
     resolver: zodResolver(editSchema),
@@ -73,16 +74,16 @@ export function ClientDetailPage() {
 
   if (!client) return <Navigate to="/clientes" replace />
 
-  const chartData = clientRevenueSeries(database, client.id)
-    .filter((item) => item.amount > 0)
-    .slice(-12)
-    .map((item) => ({ ...item, label: formatPeriod(item.period) }))
   const clientVisits = visits.filter((visit) => visit.clientId === client.id)
   const clientSales = sales.filter((sale) => sale.clientId === client.id)
   const clientServices = services.filter((service) => service.clientId === client.id)
-  const totalRevenue = database.clientRevenueMonths
-    .filter((item) => item.clientId === client.id)
-    .reduce((total, item) => total + item.amount, 0)
+  const chartData = wonSalesRevenueMetrics(clientSales, 12).map((item) => ({
+    ...item,
+    label: formatPeriod(item.period),
+  }))
+  const totalRevenue = clientSales
+    .filter((sale) => sale.stage === 'won')
+    .reduce((total, sale) => total + sale.amount, 0)
 
   const onSubmit = form.handleSubmit(async (values) => {
     await updateClient({
@@ -116,7 +117,7 @@ export function ClientDetailPage() {
         <div className="panel__header">
           <div>
             <h2>Editar cadastro</h2>
-            <p>Atualize os dados cadastrais e mantenha o histórico importado preservado.</p>
+            <p>Atualize os dados cadastrais e mantenha o cadastro organizado.</p>
           </div>
         </div>
         <form className="form-grid" onSubmit={onSubmit}>
@@ -193,25 +194,37 @@ export function ClientDetailPage() {
         <section className="panel">
           <div className="panel__header">
             <div>
-              <h2>Faturamento</h2>
-              <p>Meses com valor importado.</p>
+              <h2>Faturamento Luciana</h2>
+              <p>Vendas ganhas desse cliente.</p>
             </div>
           </div>
-          <div className="chart-frame chart-frame--small">
-            <ResponsiveContainer width="100%" height={230}>
-              <BarChart data={chartData}>
-                <CartesianGrid stroke="#e6d9c5" vertical={false} />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`}
-                />
-                <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                <Bar dataKey="amount" fill="#840716" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {totalRevenue > 0 ? (
+            <div className="chart-frame chart-frame--small">
+              <ResponsiveContainer width="100%" height={230}>
+                <BarChart data={chartData}>
+                  <CartesianGrid stroke="#e6d9c5" vertical={false} />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) =>
+                      Number(value) >= 1000
+                        ? `${Math.round(Number(value) / 1000)}k`
+                        : formatCurrency(Number(value))
+                    }
+                  />
+                  <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+                  <Bar dataKey="amount" fill="#840716" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <EmptyState
+              icon={CircleDollarSign}
+              title="Sem vendas ganhas"
+              description="O faturamento desse cliente começa quando uma venda for marcada como ganha."
+            />
+          )}
         </section>
 
         <section className="panel">

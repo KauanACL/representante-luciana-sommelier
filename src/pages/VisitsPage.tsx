@@ -1,8 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { CalendarPlus, CheckCircle2 } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { z } from 'zod'
+import { ClientSearchSelect } from '../components/ClientSearchSelect'
 import { StatusBadge } from '../components/StatusBadge'
 import { useData } from '../context/DataContext'
 import { byId } from '../lib/analytics'
@@ -31,6 +32,7 @@ export function VisitsPage() {
       clientId: clients[0]?.id ?? '',
     },
   })
+  const selectedClientId = useWatch({ control: form.control, name: 'clientId' })
 
   useEffect(() => {
     if (clients[0]?.id && !form.getValues('clientId')) {
@@ -61,16 +63,15 @@ export function VisitsPage() {
           </div>
         </div>
         <form className="form-stack" onSubmit={onSubmit}>
-          <label>
-            Cliente
-            <select {...form.register('clientId')}>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <input type="hidden" {...form.register('clientId')} />
+          <ClientSearchSelect
+            clients={clients}
+            value={selectedClientId}
+            onChange={(clientId) =>
+              form.setValue('clientId', clientId, { shouldDirty: true, shouldValidate: true })
+            }
+            error={form.formState.errors.clientId?.message}
+          />
           <label>
             Data e horário
             <input type="datetime-local" {...form.register('scheduledFor')} />

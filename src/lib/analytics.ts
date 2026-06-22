@@ -12,6 +12,128 @@ export const byId = <T extends { id: string }>(items: T[]) =>
 
 export const sum = (values: number[]) => values.reduce((total, value) => total + value, 0)
 
+export type RevenueMetric = {
+  period: string
+  amount: number
+  buyerCount: number
+  averageTicket: number
+}
+
+export type RevenuePeriodSelection = 3 | 6 | 12 | 24 | 'all'
+
+export const periodFromDate = (value: string | Date) => {
+  const date = value instanceof Date ? value : new Date(value)
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date
+  return `${safeDate.getFullYear()}/${String(safeDate.getMonth() + 1).padStart(2, '0')}`
+}
+
+export const getCurrentRevenuePeriod = () => periodFromDate(new Date())
+
+const periodToDate = (period: string) => {
+  const [year, month] = period.split('/').map(Number)
+  return new Date(year || new Date().getFullYear(), (month || 1) - 1, 1)
+}
+
+const shiftPeriod = (period: string, monthOffset: number) => {
+  const date = periodToDate(period)
+  date.setMonth(date.getMonth() + monthOffset)
+  return periodFromDate(date)
+}
+
+const periodRange = (start: string, end: string) => {
+  const periods: string[] = []
+  let current = start
+
+  while (current <= end) {
+    periods.push(current)
+    current = shiftPeriod(current, 1)
+  }
+
+  return periods
+}
+
+const recentPeriods = (endPeriod: string, limit: number) =>
+  Array.from({ length: limit }, (_, index) => shiftPeriod(endPeriod, index - limit + 1))
+
+const wonSales = (sales: Sale[]) => sales.filter((sale) => sale.stage === 'won')
+
+const saleRevenuePeriod = (sale: Sale) => periodFromDate(sale.expectedCloseDate)
+
+export const wonSalesRevenuePeriods = (
+  sales: Sale[],
+  selection: RevenuePeriodSelection = 12,
+) => {
+  const salePeriods = wonSales(sales).map(saleRevenuePeriod).sort()
+  const currentPeriod = getCurrentRevenuePeriod()
+
+  if (selection === 'all') {
+    if (!salePeriods.length) return recentPeriods(currentPeriod, 12)
+    return periodRange(salePeriods[0], salePeriods[salePeriods.length - 1])
+  }
+
+  const endPeriod = [...salePeriods, currentPeriod].sort().at(-1) ?? currentPeriod
+  return recentPeriods(endPeriod, selection)
+}
+
+export const wonSalesRevenueForPeriod = (sales: Sale[], period: string) =>
+  sum(
+    wonSales(sales)
+      .filter((sale) => saleRevenuePeriod(sale) === period)
+      .map((sale) => sale.amount),
+  )
+
+export const wonSalesRevenueMetrics = (
+  sales: Sale[],
+  selection: RevenuePeriodSelection = 12,
+): RevenueMetric[] =>
+  wonSalesRevenuePeriods(sales, selection).map((period) => {
+    const rows = wonSales(sales).filter((sale) => saleRevenuePeriod(sale) === period)
+    const amount = sum(rows.map((sale) => sale.amount))
+    const buyerCount = new Set(rows.map((sale) => sale.clientId)).size
+
+    return {
+      period,
+      amount,
+      buyerCount,
+      averageTicket: buyerCount ? amount / buyerCount : 0,
+    }
+  })
+
+export const totalWonSalesRevenueByClient = (sales: Sale[]) => {
+  const totals = new Map<string, number>()
+
+  for (const sale of wonSales(sales)) {
+    totals.set(sale.clientId, (totals.get(sale.clientId) ?? 0) + sale.amount)
+  }
+
+  return totals
+}
+
+export const topClientsByWonSalesRevenue = (clients: Client[], sales: Sale[], limit = 8) => {
+  const totals = totalWonSalesRevenueByClient(sales)
+  return [...clients]
+    .map((client) => ({ client, amount: totals.get(client.id) ?? 0 }))
+    .filter((item) => item.amount > 0)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, limit)
+}
+
+export const wonSalesRevenueByCity = (clients: Client[], sales: Sale[], limit = 8) => {
+  const clientsMap = byId(clients)
+  const totals = new Map<string, number>()
+
+  for (const sale of wonSales(sales)) {
+    const city = clientsMap.get(sale.clientId)?.city || 'Sem cidade'
+    totals.set(city, (totals.get(city) ?? 0) + sale.amount)
+  }
+
+  return [...totals.entries()]
+    .map(([city, amount]) => ({ city, amount }))
+    .filter((item) => item.amount > 0)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, limit)
+}
+
 export const getLatestRevenuePeriod = (database: LocalDatabase) =>
   database.revenuePeriods[database.revenuePeriods.length - 1] ?? ''
 
@@ -24,7 +146,7 @@ export const monthlyRevenueSeries = (database: LocalDatabase, limit = 12) =>
     amount: revenueForPeriod(database.clientRevenueMonths, period),
   }))
 
-export const monthlyRevenueMetrics = (database: LocalDatabase, limit = 12) =>
+export const monthlyRevenueMetrics = (database: LocalDatabase, limit = 12): RevenueMetric[] =>
   database.revenuePeriods.slice(-limit).map((period) => {
     const rows = database.clientRevenueMonths.filter(
       (item) => item.period === period && item.amount > 0,
@@ -131,4 +253,3 @@ export const clientGroupSummary = (clients: Client[]) => {
     .map(([group, count]) => ({ group, count }))
     .sort((a, b) => b.count - a.count)
 }
-

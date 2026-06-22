@@ -1,15 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { CheckCircle2, CircleDollarSign, XCircle } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { z } from 'zod'
+import { ClientSearchSelect } from '../components/ClientSearchSelect'
 import { StatusBadge } from '../components/StatusBadge'
 import { useData } from '../context/DataContext'
 import { byId } from '../lib/analytics'
 import { formatCurrencyPrecise, formatShortDate } from '../lib/formatters'
 
 const saleSchema = z.object({
-  clientId: z.string().min(1),
+  clientId: z.string().min(1, 'Escolha um cliente.'),
   title: z.string().min(3, 'Informe o nome da venda.'),
   amount: z.number().min(0, 'Valor invalido.'),
   stage: z.enum(['lead', 'proposal', 'won', 'lost']),
@@ -35,6 +36,7 @@ export function SalesPage() {
       notes: '',
     },
   })
+  const selectedClientId = useWatch({ control: form.control, name: 'clientId' })
 
   useEffect(() => {
     if (clients[0]?.id && !form.getValues('clientId')) {
@@ -64,20 +66,19 @@ export function SalesPage() {
         <div className="panel__header">
           <div>
             <h2>Registrar venda</h2>
-            <p>Vendas manuais ficam separadas do faturamento importado.</p>
+            <p>Vendas ganhas alimentam o faturamento da Luciana.</p>
           </div>
         </div>
         <form className="form-stack" onSubmit={onSubmit}>
-          <label>
-            Cliente
-            <select {...form.register('clientId')}>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <input type="hidden" {...form.register('clientId')} />
+          <ClientSearchSelect
+            clients={clients}
+            value={selectedClientId}
+            onChange={(clientId) =>
+              form.setValue('clientId', clientId, { shouldDirty: true, shouldValidate: true })
+            }
+            error={form.formState.errors.clientId?.message}
+          />
           <label>
             Venda
             <input placeholder="Pedido, proposta ou oportunidade" {...form.register('title')} />

@@ -12,21 +12,21 @@ import { StatusBadge } from '../components/StatusBadge'
 import { useData } from '../context/DataContext'
 import {
   clientGroupSummary,
-  getLatestRevenuePeriod,
-  monthlyRevenueMetrics,
-  revenueByCity,
-  revenueForPeriod,
-  topClientsByRevenue,
+  getCurrentRevenuePeriod,
+  topClientsByWonSalesRevenue,
   upcomingItems,
+  wonSalesRevenueByCity,
+  wonSalesRevenueForPeriod,
+  wonSalesRevenueMetrics,
 } from '../lib/analytics'
 import { formatCurrency, formatDate, formatPeriod, serviceTypeLabel } from '../lib/formatters'
 
 export function DashboardPage() {
-  const { database, clients, visits, sales, services } = useData()
-  const latestPeriod = getLatestRevenuePeriod(database)
-  const chartData = monthlyRevenueMetrics(database)
-  const topClients = topClientsByRevenue(database, 6)
-  const topCities = revenueByCity(clients, database.clientRevenueMonths, 5)
+  const { clients, visits, sales, services } = useData()
+  const currentPeriod = getCurrentRevenuePeriod()
+  const chartData = wonSalesRevenueMetrics(sales, 12)
+  const topClients = topClientsByWonSalesRevenue(clients, sales, 6)
+  const topCities = wonSalesRevenueByCity(clients, sales, 5)
   const groups = clientGroupSummary(clients).slice(0, 5)
   const agenda = upcomingItems(clients, visits, services, 6)
   const pendingVisits = visits.filter((visit) => visit.status === 'scheduled').length
@@ -38,8 +38,8 @@ export function DashboardPage() {
       <section className="stat-grid">
         <StatCard
           label="Faturamento do mês"
-          value={formatCurrency(revenueForPeriod(database.clientRevenueMonths, latestPeriod))}
-          detail={`Importado em ${formatPeriod(latestPeriod)}`}
+          value={formatCurrency(wonSalesRevenueForPeriod(sales, currentPeriod))}
+          detail={`Vendas ganhas em ${formatPeriod(currentPeriod)}`}
           icon={CircleDollarSign}
         />
         <StatCard
@@ -65,12 +65,16 @@ export function DashboardPage() {
       <section className="panel panel--wide">
         <div className="panel__header">
           <div>
-            <h2>Faturamento mensal</h2>
-            <p>Histórico importado da planilha inicial.</p>
+            <h2>Faturamento Luciana</h2>
+            <p>Vendas ganhas cadastradas no sistema.</p>
           </div>
-          <span className="soft-pill">2024-2026</span>
+          <span className="soft-pill">Últimos 12 meses</span>
         </div>
-        <RevenueOverviewChart data={chartData} />
+        <RevenueOverviewChart
+          data={chartData}
+          totalLabel="Total 12 meses"
+          ariaLabel="Resumo do faturamento da Luciana nos últimos 12 meses"
+        />
       </section>
 
       <section className="panel">
@@ -104,56 +108,72 @@ export function DashboardPage() {
         <div className="panel__header">
           <div>
             <h2>Clientes em destaque</h2>
-            <p>Ordenados pelo maior faturamento histórico importado.</p>
+            <p>Ordenados pelas vendas ganhas da Luciana.</p>
           </div>
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Cliente</th>
-                <th>Cidade</th>
-                <th>Grupo</th>
-                <th>Status</th>
-                <th className="numeric">Faturamento</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topClients.map(({ client, amount }) => (
-                <tr key={client.id}>
-                  <td>
-                    <strong>{client.name}</strong>
-                    <span>{client.email || client.phone || 'Sem contato cadastrado'}</span>
-                  </td>
-                  <td>{client.city || 'Sem cidade'}</td>
-                  <td>{client.group}</td>
-                  <td>
-                    <StatusBadge status={client.status} />
-                  </td>
-                  <td className="numeric">{formatCurrency(amount)}</td>
+        {topClients.length ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>Cidade</th>
+                  <th>Grupo</th>
+                  <th>Status</th>
+                  <th className="numeric">Faturamento</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {topClients.map(({ client, amount }) => (
+                  <tr key={client.id}>
+                    <td>
+                      <strong>{client.name}</strong>
+                      <span>{client.email || client.phone || 'Sem contato cadastrado'}</span>
+                    </td>
+                    <td>{client.city || 'Sem cidade'}</td>
+                    <td>{client.group}</td>
+                    <td>
+                      <StatusBadge status={client.status} />
+                    </td>
+                    <td className="numeric">{formatCurrency(amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState
+            icon={CircleDollarSign}
+            title="Sem vendas ganhas"
+            description="Os clientes em destaque aparecerão quando a Luciana ganhar vendas."
+          />
+        )}
       </section>
 
       <section className="panel">
         <div className="panel__header">
           <div>
             <h2>Top cidades</h2>
-            <p>Faturamento real por praça.</p>
+            <p>Faturamento da Luciana por praça.</p>
           </div>
         </div>
-        <div className="rank-list">
-          {topCities.map((city, index) => (
-            <article key={city.city}>
-              <span>{index + 1}</span>
-              <strong>{city.city}</strong>
-              <em>{formatCurrency(city.amount)}</em>
-            </article>
-          ))}
-        </div>
+        {topCities.length ? (
+          <div className="rank-list">
+            {topCities.map((city, index) => (
+              <article key={city.city}>
+                <span>{index + 1}</span>
+                <strong>{city.city}</strong>
+                <em>{formatCurrency(city.amount)}</em>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            icon={CircleDollarSign}
+            title="Sem cidades ainda"
+            description="As cidades aparecerão depois das primeiras vendas ganhas."
+          />
+        )}
       </section>
 
       <section className="panel panel--wide">

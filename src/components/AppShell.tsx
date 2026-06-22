@@ -66,11 +66,6 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
-
-        <div className="sidebar__notice">
-          <strong>Luciana Queiroz</strong>
-          <span>Clientes, agenda comercial, vendas e serviços de sommeliere em um só lugar.</span>
-        </div>
       </aside>
 
       <div className="workspace">
